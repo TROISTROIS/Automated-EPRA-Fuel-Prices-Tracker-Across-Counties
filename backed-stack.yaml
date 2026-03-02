@@ -41,8 +41,31 @@ Resources:
             Principal:
               Service:
                 - lambda.amazonaws.com
-              Action:
-                - sts:AssumeRole
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaPolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - s3:GetObject
+                Resource: 
+                  - !Join 
+                    !GetAtt LambdaCodeS3Bucket 
+                    !Sub /*
+
+              - Effect: Allow
+                Action: 
+                  - textract:DetectDocumentText
+                Resource: '*'    
+                
+              - Effect: Allow
+                Action: 
+                  - dynamodb:DetectDiocumentText
+                Resource: '*'                       
+
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-textprocessingIAMRole
