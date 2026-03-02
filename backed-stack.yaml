@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template deploys resources to handle the backend logic that involves document upload, text extraction and storage.
+
+Parameters:
+  DocumentS3BucketName:
+    Description: Fuel Prices Document S3 bucket
+    Type: String
+    Default: DocumentS3BucketName
+    
+  ZipCodeBucketName:
+    Description: Lambda ZIP code S3 bucket
+    Type: String
+    Default: ZipCodeBucketName
+
+Resources:
+  DocumentS3Bucket: 
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: !Ref DocumentS3BucketName
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-documentbucket
+
+  LambdaCodeS3Bucket: 
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: !Ref ZipCodeBucketName
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-lambdabucket
+
+  LambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: TextProcessingLambdaIAMRole
+      Description: IAM role for Lambda to access S3, Textract, DynamoDB and its execution role
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+              Action:
+                - sts:AssumeRole
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-textprocessingIAMRole
+
+
+  TextProcessingLambda:
+    Type: AWS::Lambda::Function
+    Properties: 
+      FunctionName: TextProcessingLambda
+      PackageType: Zip
+      Code: 
+        S3Bucket:
+        S3Key: 
+      Environment: 
+      Handler: 
+      Role: 
+      Timeout: 300
+      Runtime: python3.13
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-textprocessinglambda
