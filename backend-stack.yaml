@@ -1,0 +1,269 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template deploys resources to handle the backend logic that involves document upload, text extraction and storage.
+
+Parameters:
+  DocumentS3BucketName:
+    Description: Fuel Prices Document S3 bucket
+    Type: String
+    Default: DocumentS3BucketName
+
+  ZipCodeBucketKey:
+    Type: String
+    Default: process-document.zip
+    
+  ZipCodeBucketName:
+    Description: Lambda ZIP code S3 bucket
+    Type: String
+    Default: ZipCodeBucketName
+
+  EmailAddress:
+    Description: E-mail address to use with SES
+    Type: String
+
+Resources:
+  DocumentS3Bucket: 
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: !Ref DocumentS3BucketName
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-documentbucket
+
+  LambdaCodeS3Bucket: 
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: !Ref ZipCodeBucketName
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-lambdabucket
+
+  DynamoDB:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-epratb
+      AttributeDefinitions:
+        - AttributeName: Town
+          AttributeType: S
+      KeySchema:
+      - AttributeName: Town
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-dynamodbtable
+
+  FuelTrackerConfigSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties: 
+      Name: !Sub ${AWS::StackName}-SESconfigset
+      SendingOptions:
+        SendingEnabled: true
+
+  SESEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName: !Ref FuelTrackerConfigSet
+      EventDestination:
+        Name: !Sub "${AWS::StackName}-EventBridgeDestination"
+        Enabled: true
+        MatchingEventTypes: [send, delivery, bounce, complaint]
+        EventBridgeDestination: {}
+
+  SESIdentity:
+    Type: AWS::SES::EmailIdentity
+    Properties: 
+      EmailIdentity: !Ref EmailAddress
+      ConfigurationSetAttributes:
+        ConfigurationSetName: !Ref FuelTrackerConfigSet
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-sesidentity
+
+  LambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-lambdaIAMRole
+      Description: IAM role for Lambda to access S3, Textract, DynamoDB and its execution role
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: FuelTrackerLambdaPolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - s3:GetObject
+                Resource: 
+                  - !Sub "arn:aws:s3:::${DocumentS3Bucket}/*"
+
+              - Effect: Allow
+                Action: 
+                  - textract:StartDocumentAnalysis
+                  - textract:GetDocumentAnalysis
+                Resource: '*'    
+                
+              - Effect: Allow
+                Action: 
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !GetAtt DynamoDB.Arn 
+
+              - Effect: Allow
+                Action:
+                - ses:SendEmail
+                Resource: '*'
+
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'                      
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-textprocessingIAMRole
+
+  TextProcessingLambda:
+    Type: AWS::Lambda::Function
+    Properties: 
+      FunctionName: TextProcessingLambda
+      PackageType: Zip
+      Code: 
+        S3Bucket: !Ref LambdaCodeS3Bucket
+        S3Key: !Ref ZipCodeBucketKey
+      Handler: process-document.lambda_handler
+      Role: !GetAtt LambdaIAMRole.Arn
+      Timeout: 300
+      Runtime: python3.13
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-textprocessinglambda
+          
+  SESEventLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/ses/${AWS::StackName}-SES-log-group"
+      RetentionInDays: 1
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-log-group-SES
+
+  SESLogResourcePolicy:
+    Type: AWS::Logs::ResourcePolicy
+    Properties:
+      PolicyName: !Sub ${AWS::StackName}-AllowEventBridge-Policy
+      PolicyDocument: !Sub > 
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": { "Service": "events.amazonaws.com" },
+              "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
+              "Resource": "${SESEventLogGroup.Arn}"
+            }
+          ]
+        }
+
+  SESEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${AWS::StackName}-SES-EventBridge-rule
+      Description: Captures SES email events for the fuel project
+      EventPattern:
+        source:
+          - "aws.ses"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt SESEventLogGroup.Arn
+          Id: "SESToCloudWatch"
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-SES-event-rule
+
+  EmptyS3LambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub emptys3-${AWS::StackName}-lambdaIAMRole
+      Description: IAM role for Lambda to empty s3 bucket during stack deletion
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EmptyS3LambdaPolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource: 
+                  - !Sub "arn:aws:s3:::${DocumentS3Bucket}/*"
+                  - !Sub "arn:aws:s3:::${LambdaCodeS3Bucket}/*"                  
+
+              - Effect: Allow
+                Action: 
+                  - s3:ListBucket
+                Resource: 
+                  - !Sub "arn:aws:s3:::${DocumentS3Bucket}"
+                  - !Sub "arn:aws:s3:::${LambdaCodeS3Bucket}"
+
+  EmptyS3BucketLambda:
+    Type: AWS::Lambda::Function
+    Properties: 
+      FunctionName: !Sub "emptys3bucket-${AWS::StackName}"
+      Handler: index.lambda_handler
+      Role: !GetAtt EmptyS3LambdaIAMRole.Arn
+      Timeout: 300
+      Runtime: python3.13
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          def lambda_handler(event, context):
+            try:
+              print("***** EVENT *****", event)
+              if event['RequestType'] == 'Delete':
+                bucket_list = event['ResourceProperties']['BucketNames']
+                s3 = boto3.resource('s3')
+                for b in bucket_list:
+                  print(f"Emptying bucket: {b}")
+                  s3.Bucket(b).objects.all().delete()
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:
+              print("ERROR", e )
+              cfnresponse.send(event, context, cfnresponse.FAILED, {"Message": str(e)})
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-textprocessinglambda
+
+  EmptyS3Bucket:
+    Type: Custom::EmptyS3Bucket
+    Properties:
+      ServiceTimeout: 35
+      ServiceToken: !GetAtt EmptyS3BucketLambda.Arn
+      BucketNames: 
+        - !Ref DocumentS3Bucket
+        - !Ref LambdaCodeS3Bucket
