@@ -34,6 +34,7 @@ def lambda_handler(event, context):
                     'SNSTopicArn': topic_arn,
                     'RoleArn': textract_role
                 },
+                
                 # Unique identifier to track this job in logs
                 ClientRequestToken=key.replace('/', '-') 
             )
