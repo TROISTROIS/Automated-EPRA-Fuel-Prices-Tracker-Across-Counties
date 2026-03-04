@@ -103,7 +103,7 @@ Resources:
 
               - Effect: Allow
                 Action: 
-                  - textract:StartDocumentTextDetection
+                  - textract:StartDocumentAnalysis
                 Resource: '*'    
 
               - Effect: Allow
@@ -214,12 +214,12 @@ Resources:
 
               - Effect: Allow
                 Action: 
-                  - textract:GetDocumentTextDetection
+                  - textract:GetDocumentAnalysis
                 Resource: '*'  
 
               - Effect: Allow
                 Action: 
-                  - sns:subscribe
+                  - sns:Subscribe
                 Resource: !Ref TextractNotificationTopic    
 
               - Effect: Allow
@@ -257,6 +257,14 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${GetProcessedDocumentLambdaFunction}'
       RetentionInDays: 1
+
+  SNSInvokeGetProcessedDocumentLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt GetProcessedDocumentLambdaFunction.Arn
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref TextractNotificationTopic
 
   GetProcessedDocumentLambdaSubscription:
     Type: AWS::SNS::Subscription
