@@ -5,26 +5,45 @@ Parameters:
   DocumentS3BucketName:
     Description: Fuel Prices Document S3 bucket
     Type: String
-    Default: DocumentS3BucketName
-
-  ZipCodeBucketKey:
-    Type: String
-    Default: process-document.zip
-    
+   
   ZipCodeBucketName:
-    Description: Lambda ZIP code S3 bucket
+    Description: Lambda ZIP codes S3 bucket name
     Type: String
-    Default: ZipCodeBucketName
 
-  EmailAddress:
-    Description: E-mail address to use with SES
+  ProcessDocumentCodeBucketKey:
     Type: String
+    Description: The name of the zip file for sending documents to textract.
+
+  GetDocumentCodeBucketKey:
+    Type: String
+    Description: The name of the zip file for getting documents from textract.
+
+  DocumentProcessingLambdaFunction:
+    Type: String
+    Description: The name of the Lambda function.
+
+  GetProcessedDocumentLambdaFunction:
+    Type: String
+    Description: The name of the Lambda function for post-processing.
+
+  TextractSNSTriggerRoleName:
+    Type: String
+    Description: The name of the IAM role for Textract SNS trigger.
 
 Resources:
   DocumentS3Bucket: 
     Type: AWS::S3::Bucket
     Properties: 
       BucketName: !Ref DocumentS3BucketName
+#     NotificationConfiguration:
+#        LambdaConfigurations:
+#          - Event: s3:ObjectCreated:*
+#            Filter:
+#              S3Key:
+#                Rules:
+#                 - Name: prefix
+#                    Value: incoming/
+#            Function: !Ref !GetAtt TextProcessingLambda.Arn
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-documentbucket
@@ -35,7 +54,7 @@ Resources:
       BucketName: !Ref ZipCodeBucketName
       Tags:
         - Key: Name
-          Value: !Sub ${AWS::StackName}-lambdabucket
+          Value: !Sub ${AWS::StackName}-lambdazipbucket
 
   DynamoDB:
     Type: AWS::DynamoDB::Table
@@ -54,34 +73,7 @@ Resources:
         - Key: Name
           Value: !Sub ${AWS::StackName}-dynamodbtable
 
-  FuelTrackerConfigSet:
-    Type: AWS::SES::ConfigurationSet
-    Properties: 
-      Name: !Sub ${AWS::StackName}-SESconfigset
-      SendingOptions:
-        SendingEnabled: true
-
-  SESEventDestination:
-    Type: AWS::SES::ConfigurationSetEventDestination
-    Properties:
-      ConfigurationSetName: !Ref FuelTrackerConfigSet
-      EventDestination:
-        Name: !Sub "${AWS::StackName}-EventBridgeDestination"
-        Enabled: true
-        MatchingEventTypes: [send, delivery, bounce, complaint]
-        EventBridgeDestination: {}
-
-  SESIdentity:
-    Type: AWS::SES::EmailIdentity
-    Properties: 
-      EmailIdentity: !Ref EmailAddress
-      ConfigurationSetAttributes:
-        ConfigurationSetName: !Ref FuelTrackerConfigSet
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-sesidentity
-
-  LambdaIAMRole:
+  DocumentProcessingLambdaIAMRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub ${AWS::StackName}-lambdaIAMRole
@@ -106,14 +98,114 @@ Resources:
                 Action: 
                   - s3:GetObject
                 Resource: 
-                  - !Sub "arn:aws:s3:::${DocumentS3Bucket}/*"
+                  - !Sub arn:aws:s3:::${DocumentS3Bucket}/*
+                  - !Sub arn:aws:s3:::${DocumentS3Bucket}
 
               - Effect: Allow
                 Action: 
-                  - textract:StartDocumentAnalysis
-                  - textract:GetDocumentAnalysis
+                  - textract:StartDocumentTextDetection
                 Resource: '*'    
-                
+
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'    
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-textprocessingIAMRole
+
+  DocumentProcessingLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties: 
+      FunctionName: !Ref DocumentProcessingLambdaFunction
+      PackageType: Zip
+      Code: 
+        S3Bucket: !Ref ZipCodeBucketName
+        S3Key: !Ref ProcessDocumentCodeBucketKey
+      Handler: process-document.lambda_handler
+      Environment:
+        Variables:
+          TEXTRACT_NOTIFICATION_TOPIC: !Ref TextractNotificationTopic
+          TEXTRACT_ROLE_ARN: !GetAtt TextractSNSTriggerRole.Arn
+      Role: !GetAtt DocumentProcessingLambdaIAMRole.Arn
+      Timeout: 10
+      Runtime: python3.13
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-textprocessinglambda
+
+  S3InvokeDocumentProcessingLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DocumentProcessingLambdaFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${DocumentS3Bucket}  
+
+  DocumentProcessingLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${DocumentProcessingLambdaFunction}'
+      RetentionInDays: 1
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-lambda-log-group
+
+  TextractNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Textract SNS Notification Topic
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-sns-topic
+
+  TextractSNSTriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref TextractSNSTriggerRoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: textract.amazonaws.com
+            Action: sts:AssumeRole
+
+      Policies:
+        - PolicyName: TextractSNSPublishPolicy
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref TextractNotificationTopic
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-sns-trigger-IAMRole
+
+  GetProcessedDocumentLambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-lambdaIAMRole
+      Description: IAM role for Lambda to access S3, Textract, DynamoDB and its execution role
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: FuelTrackerLambdaPolicy
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
               - Effect: Allow
                 Action: 
                   - dynamodb:GetItem
@@ -121,83 +213,57 @@ Resources:
                 Resource: !GetAtt DynamoDB.Arn 
 
               - Effect: Allow
-                Action:
-                - ses:SendEmail
-                Resource: '*'
+                Action: 
+                  - textract:GetDocumentTextDetection
+                Resource: '*'  
+
+              - Effect: Allow
+                Action: 
+                  - sns:subscribe
+                Resource: !Ref TextractNotificationTopic    
 
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: '*'                      
-
+                Resource: '*'    
       Tags:
         - Key: Name
-          Value: !Sub ${AWS::StackName}-textprocessingIAMRole
+          Value: !Sub ${AWS::StackName}-processedtextIAMRole
 
-  TextProcessingLambda:
+  GetProcessedDocumentLambdaFunction:
     Type: AWS::Lambda::Function
     Properties: 
-      FunctionName: TextProcessingLambda
+      FunctionName: !Ref GetProcessedDocumentLambdaFunction
       PackageType: Zip
       Code: 
-        S3Bucket: !Ref LambdaCodeS3Bucket
-        S3Key: !Ref ZipCodeBucketKey
-      Handler: process-document.lambda_handler
+        S3Bucket: !Ref ZipCodeBucketName
+        S3Key: !Ref GetDocumentCodeBucketKey
+      Handler: fetch-document.lambda_handler
       Environment:
         Variables:
-          DYNAMODB_TABLE: !Ref DynamoDB
-          SES_SENDER_EMAIL: !Ref EmailAddress
-          SES_RECIPIENT_EMAIL: !Ref EmailAddress
-      Role: !GetAtt LambdaIAMRole.Arn
-      Timeout: 300
+          TEXTRACT_NOTIFICATION_TOPIC: !Ref TextractNotificationTopic
+          TEXTRACT_ROLE_ARN: !GetAtt TextractSNSTriggerRole.Arn
+      Role: !GetAtt GetProcessedDocumentLambdaIAMRole.Arn
+      Timeout: 10
       Runtime: python3.13
       Tags:
         - Key: Name
-          Value: !Sub ${AWS::StackName}-textprocessinglambda
-          
-  SESEventLogGroup:
+          Value: !Sub ${AWS::StackName}-processed-text-lambda
+
+  GetProcessedDocumentLambdaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/ses/${AWS::StackName}-SES-log-group"
+      LogGroupName: !Sub '/aws/lambda/${GetProcessedDocumentLambdaFunction}'
       RetentionInDays: 1
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-log-group-SES
 
-  SESLogResourcePolicy:
-    Type: AWS::Logs::ResourcePolicy
+  GetProcessedDocumentLambdaSubscription:
+    Type: AWS::SNS::Subscription
     Properties:
-      PolicyName: !Sub ${AWS::StackName}-AllowEventBridge-Policy
-      PolicyDocument: !Sub > 
-        {
-          "Version": "2012-10-17",
-          "Statement": [
-            {
-              "Effect": "Allow",
-              "Principal": { "Service": "events.amazonaws.com" },
-              "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-              "Resource": "${SESEventLogGroup.Arn}"
-            }
-          ]
-        }
-
-  SESEventRule:
-    Type: AWS::Events::Rule
-    Properties:
-      Name: !Sub ${AWS::StackName}-SES-EventBridge-rule
-      Description: Captures SES email events for the fuel project
-      EventPattern:
-        source:
-          - "aws.ses"
-      State: ENABLED
-      Targets:
-        - Arn: !GetAtt SESEventLogGroup.Arn
-          Id: "SESToCloudWatch"
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-SES-event-rule
+      Protocol: lambda
+      TopicArn: !Ref TextractNotificationTopic
+      Endpoint: !GetAtt GetProcessedDocumentLambdaFunction.Arn
 
   EmptyS3LambdaIAMRole:
     Type: AWS::IAM::Role
@@ -232,8 +298,8 @@ Resources:
                 Action: 
                   - s3:ListBucket
                 Resource: 
-                  - !Sub "arn:aws:s3:::${DocumentS3Bucket}"
-                  - !Sub "arn:aws:s3:::${LambdaCodeS3Bucket}"
+                  - !Sub "arn:aws:s3:::${DocumentS3BucketName}"
+                  - !Sub "arn:aws:s3:::${ZipCodeBucketName}"
 
   EmptyS3BucketLambda:
     Type: AWS::Lambda::Function
@@ -270,5 +336,5 @@ Resources:
       ServiceTimeout: 35
       ServiceToken: !GetAtt EmptyS3BucketLambda.Arn
       BucketNames: 
-        - !Ref DocumentS3Bucket
-        - !Ref LambdaCodeS3Bucket
+        - !Ref DocumentS3BucketName
+        - !Ref ZipCodeBucketName
