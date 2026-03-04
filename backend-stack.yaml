@@ -41,8 +41,8 @@ Resources:
 #            Filter:
 #              S3Key:
 #                Rules:
-#                 - Name: prefix
-#                    Value: incoming/
+#                 - Name: suffix
+#                    Value: .pdf
 #            Function: !Ref !GetAtt TextProcessingLambda.Arn
       Tags:
         - Key: Name
