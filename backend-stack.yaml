@@ -145,6 +145,11 @@ Resources:
         S3Bucket: !Ref LambdaCodeS3Bucket
         S3Key: !Ref ZipCodeBucketKey
       Handler: process-document.lambda_handler
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDB
+          SES_SENDER_EMAIL: !Ref EmailAddress
+          SES_RECIPIENT_EMAIL: !Ref EmailAddress
       Role: !GetAtt LambdaIAMRole.Arn
       Timeout: 300
       Runtime: python3.13
