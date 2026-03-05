@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Bootstrap stack to create the S3 bucket for Lambda code artifacts.
+
+Parameters:
+  ZipCodeBucketName:
+    Type: String
+    Description: Name of the S3 bucket to store Lambda ZIP files and CloudFormation artifacts.
+
+Resources:
+  LambdaCodeS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ZipCodeBucketName
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-artifact-bucket
+
+Outputs:
+  ArtifactBucketName:
+    Description: The name of the artifact bucket
+    Value: !Ref LambdaCodeS3Bucket
+    Export:
+      Name: !Sub ${AWS::StackName}-ArtifactBucketName
