@@ -147,7 +147,6 @@ Resources:
   TextractSQSQueue:
     Type: AWS::SQS::Queue 
     Properties:
-      FifoQueue: False
       QueueName: !Ref SQSQueueName
       VisibilityTimeout: 900
       Tags:
