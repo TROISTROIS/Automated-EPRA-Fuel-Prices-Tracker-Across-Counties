@@ -153,13 +153,62 @@ Resources:
         - Key: Name
           Value: !Sub ${AWS::StackName}-lambda-log-group
 
+  TextractSQSQueue:
+    Type: AWS::SQS::Queue 
+    Properties:
+      FifoQueue: False
+      QueueName: !Ref SQSQueueName
+      VisibilityTimeout: 900
+      Tags:
+        - Key: Name
+          Value: !Sub AmazonTextract-${AWS::StackName}-queue
+
+  SQSQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref TextractSQSQueue
+      PolicyDocument:
+        Statement:
+          - Effect: Allow,
+            Principal": {
+            Service: sns.amazonaws.com
+            },
+            Action: 
+              - SQS:SendMessage
+            Resource: arn:aws:sqs:us-east-1:966392475043:AmazonTextractQueue-for-SNS",
+            Condition: {
+            ArnLike: {
+              aws:SourceArn: arn:aws:sns:us-east-1:966392475043:AmazonTextractSNSTopic
+            }
+
   TextractNotificationTopic:
     Type: AWS::SNS::Topic
     Properties:
+      Subscription:
+        - Endpoint: !Ref TextractSQSQueue
+          Protocol: sqs
+      TopicName: !Ref SNSTopic
       DisplayName: Textract SNS Notification Topic
       Tags:
         - Key: Name
-          Value: !Sub ${AWS::StackName}-sns-topic
+          Value: !Sub AmazonTextract-${AWS::StackName}-topic
+
+  SNSTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref TextractNotificationTopic
+      PolicyDocument:
+        - Effect: Allow
+          Principal:
+            AWS:
+              - ${AWS::AccountId
+          Action: "*"
+          Resource: arn:aws:sns:us-east-1:966392475043:AmazonTextractSNSTopic
+          Condition: 
+          "StringEquals": 
+          "AWS:SourceAccount": "966392475043"
 
   TextractSNSTriggerRole:
     Type: AWS::IAM::Role
@@ -210,6 +259,12 @@ Resources:
                 Action: 
                   - dynamodb:GetItem
                   - dynamodb:PutItem
+                  - dynamodb:BatchWriteItem
+                Resource: !GetAtt DynamoDB.Arn 
+
+              - Effect: Allow
+                Action: 
+                  - sqs:ReceiveMessage
                 Resource: !GetAtt DynamoDB.Arn 
 
               - Effect: Allow
@@ -219,7 +274,9 @@ Resources:
 
               - Effect: Allow
                 Action: 
-                  - sns:Subscribe
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
                 Resource: !Ref TextractNotificationTopic    
 
               - Effect: Allow
@@ -252,25 +309,34 @@ Resources:
         - Key: Name
           Value: !Sub ${AWS::StackName}-processed-text-lambda
 
+  SQSLambdaTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn: !GetAtt.Arn TextractSQSQueue
+      FunctionName: !Ref GetProcessedDocumentLambdaFunction
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-sqs-lambda-trigger    
+
   GetProcessedDocumentLambdaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/lambda/${GetProcessedDocumentLambdaFunction}'
       RetentionInDays: 1
 
-  SNSInvokeGetProcessedDocumentLambdaPermission:
+  SQSInvokeGetProcessedDocumentLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !GetAtt GetProcessedDocumentLambdaFunction.Arn
-      Principal: sns.amazonaws.com
-      SourceArn: !Ref TextractNotificationTopic
+      Principal: sqs.amazonaws.com
+      SourceArn: !GetAtt.Arn TextractSQSQueue
 
   GetProcessedDocumentLambdaSubscription:
     Type: AWS::SNS::Subscription
     Properties:
       Protocol: lambda
-      TopicArn: !Ref TextractNotificationTopic
+      TopicArn: !!GetAtt.Arn TextractSQSQueue
       Endpoint: !GetAtt GetProcessedDocumentLambdaFunction.Arn
 
   EmptyS3LambdaIAMRole:
