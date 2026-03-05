@@ -2,6 +2,7 @@ import json
 import boto3
 import urllib.parse
 import logging 
+import os
 
 # Initialize logger
 logger = logging.getLogger()
@@ -9,6 +10,9 @@ logger.setLevel(logging.INFO)
 
 s3 = boto3.client('s3')
 textract = boto3.client('textract')
+
+topic_arn = os.environ ['TEXTRACT_NOTIFICATION_TOPIC'] 
+textract_role = os.environ['TEXTRACT_ROLE_ARN']
 
 def lambda_handler(event, context):
     print(json.dumps(event))
@@ -33,10 +37,9 @@ def lambda_handler(event, context):
             },
             FeatureTypes=['TABLES'],
             NotificationChannel={
-                'SNSTopicArn': 'arn:aws:sns:us-east-1:966392475043:AmazonTextractSNSTopic',
-                'RoleArn': 'arn:aws:iam::966392475043:role/TextractIAMRoleforSNS'
+                'SNSTopicArn': topic_arn,
+                'RoleArn': textract_role
             }
-
         )
 
         job_id = textract_response['JobId']
