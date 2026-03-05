@@ -2,33 +2,34 @@ import json
 import boto3
 import logging
 import re
+import os
 from decimal import Decimal
 
-# Initialize logger
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Initialize AWS Clients
 textract = boto3.client('textract')
 dynamodb = boto3.resource('dynamodb')
 
-# Replace with your actual table name
-TABLE_NAME = 'EPRA-tb'
-table = dynamodb.Table(TABLE_NAME)
+table_name = os.environ ['DYNAMODB_TABLE']
+table = dynamodb.Table(table_name)
 
 def lambda_handler(event, context):
-    print(json.dumps(event))
+    logger.info(f"Event: {json.dumps(event)}")
     try:
-        # Loop through every message in the SQS batch
         for record in event['Records']:
             sqs_body = json.loads(record['body'])
             sns_message = json.loads(sqs_body['Message'])
             
-            job_id = sns_message['JobId']
-            status = sns_message['Status']
-            s3_file = sns_message['DocumentLocation']['S3ObjectName']
+            job_id = sns_message.get('JobId')
+            status = sns_message.get('Status')
             
-            logger.info(f"Processing Job: {job_id} for {s3_file} (Status: {status})")
+            if not job_id:
+                logger.error("JobId not found in SNS message")
+                continue
+
+            logger.info(f"Processing Job: {job_id} (Status: {status})")
 
             if status == 'SUCCEEDED':
                 all_blocks = []
@@ -46,31 +47,33 @@ def lambda_handler(event, context):
                     if not next_token:
                         break
 
-                logger.info(f"Retrieved a total of {len(all_blocks)} blocks.")
+                logger.info(f"Retrieved {len(all_blocks)} blocks.")
+                extracted_data = parse_textract_blocks(all_blocks)
                 
-                extracted_towns = parse_textract_blocks(all_blocks)
-                
-                if extracted_towns:
-                    save_to_dynamo_batch(extracted_towns, job_id)
+                if extracted_data:
+                    save_to_dynamo_batch(extracted_data, job_id)
                 else:
-                    logger.error(f"No fuel price table found for Job: {job_id}")
+                    logger.warning(f"No fuel price data extracted for Job: {job_id}")
 
     except Exception as e:
         logger.error(f"Fatal Lambda Error: {str(e)}")
         raise e 
 
-    return {'statusCode': 200, 'body': 'Table data processed and saved.'}
+    return {'statusCode': 200, 'body': 'Processing complete.'}
 
 def parse_textract_blocks(blocks):
     block_map = {b['Id']: b for b in blocks}
     effective_date = "Unknown Period"
     town_results = []
     
-    # Find the date string
+    # Try to find the effective date usually in a LINE block
     for b in blocks:
-        if b['BlockType'] == 'LINE' and 'March 2026' in b.get('Text', ''):
-            effective_date = b['Text']
-            break
+        # Looking for date pattern March 2026
+        if b['BlockType'] == 'LINE':
+            text = b.get('Text', '')
+            if any(month in text for month in ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']):
+                effective_date = text
+                break
 
     tables = [b for b in blocks if b['BlockType'] == 'TABLE']
     for table_block in tables:
@@ -81,14 +84,12 @@ def parse_textract_blocks(blocks):
             if rel['Type'] == 'CHILD':
                 for cell_id in rel['Ids']:
                     cell = block_map[cell_id]
-                    
-                    # --- THE FIX: Only process if it is a CELL ---
                     if cell['BlockType'] != 'CELL':
                         continue
                     
                     r, c = cell['RowIndex'], cell['ColumnIndex']
                     
-                    # Get Text for this cell
+                    # Extract text from cell
                     text = ""
                     if 'Relationships' in cell:
                         for child_id in cell['Relationships'][0]['Ids']:
@@ -96,8 +97,8 @@ def parse_textract_blocks(blocks):
                     
                     val = text.strip()
                     
-                    # Check if this table contains our data
-                    if any(x in val.upper() for x in ["MOMBASA", "TOWNS", "SUPER PETROL"]):
+                    # Detect if this is the fuel price table
+                    if any(x in val.upper() for x in ["MOMBASA", "SUPER PETROL", "DIESEL", "KEROSENE"]):
                         is_target_table = True
                     
                     if r not in rows: rows[r] = {}
@@ -105,10 +106,10 @@ def parse_textract_blocks(blocks):
 
         if is_target_table:
             for r_idx, cols in rows.items():
-                town_name = cols.get(2, "")
-                # Ensure it's a data row (check if column 3 has a price)
+                town_name = cols.get(2, "") 
+                # Check for validity: town name exists and price column has at least one digit
                 if town_name and any(char.isdigit() for char in cols.get(3, "")):
-                    if town_name.upper() != "TOWNS":
+                    if town_name.upper() not in ["TOWNS", "TOWN"]:
                         town_results.append({
                             'Town': town_name,
                             'Petrol': cols.get(3),
@@ -117,12 +118,12 @@ def parse_textract_blocks(blocks):
                             'EffectiveDate': effective_date
                         })
     return town_results
+
 def save_to_dynamo_batch(data_list, job_id):
-    """Saves multiple items safely by checking for empty price strings."""
     with table.batch_writer() as batch:
         for entry in data_list:
             try:
-                
+                # Clean numeric values
                 p_raw = re.sub(r'[^\d.]', '', entry.get('Petrol', ''))
                 d_raw = re.sub(r'[^\d.]', '', entry.get('Diesel', ''))
                 k_raw = re.sub(r'[^\d.]', '', entry.get('Kerosene', ''))
@@ -133,7 +134,7 @@ def save_to_dynamo_batch(data_list, job_id):
 
                 batch.put_item(
                     Item={
-                        'Towns': entry['Town'],
+                        'Town': entry['Town'], 
                         'EffectiveDate': entry['EffectiveDate'],
                         'PetrolPrice': petrol_val,
                         'DieselPrice': diesel_val,
