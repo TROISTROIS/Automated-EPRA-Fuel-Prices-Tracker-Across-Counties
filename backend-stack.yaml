@@ -6,9 +6,9 @@ Parameters:
     Description: Fuel Prices Document S3 bucket
     Type: String
    
-  ZipCodeBucketName:
-    Description: Lambda ZIP codes S3 bucket name
+  ArtifactBucketName:
     Type: String
+    Description: Name of the S3 bucket created in the bootstrap stack (for cleanup during deletion).
 
   DocumentProcessingLambdaFunctionName:
     Type: String
@@ -48,13 +48,6 @@ Resources:
         - Key: Name
           Value: !Sub ${AWS::StackName}-documentbucket
 
-  LambdaCodeS3Bucket: 
-    Type: AWS::S3::Bucket
-    Properties: 
-      BucketName: !Ref ZipCodeBucketName
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-lambdazipbucket
 
   DynamoDB:
     Type: AWS::DynamoDB::Table
@@ -348,14 +341,14 @@ Resources:
                   - s3:DeleteObject
                 Resource: 
                   - !Sub "arn:aws:s3:::${DocumentS3Bucket}/*"
-                  - !Sub "arn:aws:s3:::${LambdaCodeS3Bucket}/*"                  
+                  - !Sub "arn:aws:s3:::${ArtifactBucketName}/*"                  
 
               - Effect: Allow
                 Action: 
                   - s3:ListBucket
                 Resource: 
                   - !Sub "arn:aws:s3:::${DocumentS3BucketName}"
-                  - !Sub "arn:aws:s3:::${ZipCodeBucketName}"
+                  - !Sub "arn:aws:s3:::${ArtifactBucketName}"
 
   EmptyS3BucketLambda:
     Type: AWS::Lambda::Function
@@ -393,4 +386,4 @@ Resources:
       ServiceToken: !GetAtt EmptyS3BucketLambda.Arn
       BucketNames: 
         - !Ref DocumentS3BucketName
-        - !Ref ZipCodeBucketName
+        - !Ref ArtifactBucketName
