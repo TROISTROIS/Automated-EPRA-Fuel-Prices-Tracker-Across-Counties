@@ -10,14 +10,6 @@ Parameters:
     Description: Lambda ZIP codes S3 bucket name
     Type: String
 
-  ProcessDocumentCodeBucketKey:
-    Type: String
-    Description: The name of the zip file for sending documents to textract.
-
-  GetDocumentCodeBucketKey:
-    Type: String
-    Description: The name of the zip file for getting documents from textract.
-
   DocumentProcessingLambdaFunctionName:
     Type: String
     Description: The name of the Lambda function.
@@ -129,9 +121,7 @@ Resources:
     Properties: 
       FunctionName: !Ref DocumentProcessingLambdaFunctionName
       PackageType: Zip
-      Code: 
-        S3Bucket: !Ref ZipCodeBucketName
-        S3Key: !Ref ProcessDocumentCodeBucketKey
+      Code: ./process-document.py
       Handler: process-document.lambda_handler
       Environment:
         Variables:
@@ -296,9 +286,7 @@ Resources:
     Properties: 
       FunctionName: !Ref GetProcessedDocumentLambdaFunctionName
       PackageType: Zip
-      Code: 
-        S3Bucket: !Ref ZipCodeBucketName
-        S3Key: !Ref GetDocumentCodeBucketKey
+      Code: ./fetch-document.py
       Handler: fetch-document.lambda_handler
       Environment:
         Variables:
