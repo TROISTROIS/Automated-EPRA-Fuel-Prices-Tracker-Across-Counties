@@ -18,17 +18,25 @@ Parameters:
     Type: String
     Description: The name of the zip file for getting documents from textract.
 
-  DocumentProcessingLambdaFunction:
+  DocumentProcessingLambdaFunctionName:
     Type: String
     Description: The name of the Lambda function.
 
-  GetProcessedDocumentLambdaFunction:
+  GetProcessedDocumentLambdaFunctionName:
     Type: String
     Description: The name of the Lambda function for post-processing.
 
   TextractSNSTriggerRoleName:
     Type: String
     Description: The name of the IAM role for Textract SNS trigger.
+
+  SQSQueueName:
+    Type: String
+    Description: The name of the SQS queue for Textract notifications.
+
+  SNSTopic:
+    Type: String
+    Description: The name of the SNS topic for Textract notifications.
 
 Resources:
   DocumentS3Bucket: 
@@ -119,7 +127,7 @@ Resources:
   DocumentProcessingLambdaFunction:
     Type: AWS::Lambda::Function
     Properties: 
-      FunctionName: !Ref DocumentProcessingLambdaFunction
+      FunctionName: !Ref DocumentProcessingLambdaFunctionName
       PackageType: Zip
       Code: 
         S3Bucket: !Ref ZipCodeBucketName
@@ -130,7 +138,7 @@ Resources:
           TEXTRACT_NOTIFICATION_TOPIC: !Ref TextractNotificationTopic
           TEXTRACT_ROLE_ARN: !GetAtt TextractSNSTriggerRole.Arn
       Role: !GetAtt DocumentProcessingLambdaIAMRole.Arn
-      Timeout: 10
+      Timeout: 60
       Runtime: python3.13
       Tags:
         - Key: Name
@@ -169,18 +177,16 @@ Resources:
       Queues:
         - !Ref TextractSQSQueue
       PolicyDocument:
+        Version: 2012-10-17
         Statement:
-          - Effect: Allow,
-            Principal": {
-            Service: sns.amazonaws.com
-            },
-            Action: 
-              - SQS:SendMessage
-            Resource: arn:aws:sqs:us-east-1:966392475043:AmazonTextractQueue-for-SNS",
-            Condition: {
-            ArnLike: {
-              aws:SourceArn: arn:aws:sns:us-east-1:966392475043:AmazonTextractSNSTopic
-            }
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: SQS:SendMessage
+            Resource: !GetAtt TextractSQSQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Ref TextractNotificationTopic
 
   TextractNotificationTopic:
     Type: AWS::SNS::Topic
@@ -200,15 +206,16 @@ Resources:
       Topics:
         - !Ref TextractNotificationTopic
       PolicyDocument:
-        - Effect: Allow
-          Principal:
-            AWS:
-              - ${AWS::AccountId
-          Action: "*"
-          Resource: arn:aws:sns:us-east-1:966392475043:AmazonTextractSNSTopic
-          Condition: 
-          "StringEquals": 
-          "AWS:SourceAccount": "966392475043"
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: "*"
+            Action: SNS:Publish
+            Resource: !Ref TextractNotificationTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
 
   TextractSNSTriggerRole:
     Type: AWS::IAM::Role
@@ -237,7 +244,7 @@ Resources:
   GetProcessedDocumentLambdaIAMRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub ${AWS::StackName}-lambdaIAMRole
+      RoleName: !Sub ${AWS::StackName}-processedLambdaIAMRole
       Description: IAM role for Lambda to access S3, Textract, DynamoDB and its execution role
       AssumeRolePolicyDocument: 
         Version: 2012-10-17
@@ -265,19 +272,14 @@ Resources:
               - Effect: Allow
                 Action: 
                   - sqs:ReceiveMessage
-                Resource: !GetAtt DynamoDB.Arn 
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt TextractSQSQueue.Arn
 
               - Effect: Allow
                 Action: 
                   - textract:GetDocumentAnalysis
-                Resource: '*'  
-
-              - Effect: Allow
-                Action: 
-                  - sqs:ReceiveMessage
-                  - sqs:DeleteMessage
-                  - sqs:GetQueueAttributes
-                Resource: !Ref TextractNotificationTopic    
+                Resource: '*'
 
               - Effect: Allow
                 Action:
@@ -292,7 +294,7 @@ Resources:
   GetProcessedDocumentLambdaFunction:
     Type: AWS::Lambda::Function
     Properties: 
-      FunctionName: !Ref GetProcessedDocumentLambdaFunction
+      FunctionName: !Ref GetProcessedDocumentLambdaFunctionName
       PackageType: Zip
       Code: 
         S3Bucket: !Ref ZipCodeBucketName
@@ -300,10 +302,9 @@ Resources:
       Handler: fetch-document.lambda_handler
       Environment:
         Variables:
-          TEXTRACT_NOTIFICATION_TOPIC: !Ref TextractNotificationTopic
-          TEXTRACT_ROLE_ARN: !GetAtt TextractSNSTriggerRole.Arn
+          DYNAMODB_TABLE: !Ref DynamoDB
       Role: !GetAtt GetProcessedDocumentLambdaIAMRole.Arn
-      Timeout: 10
+      Timeout: 300
       Runtime: python3.13
       Tags:
         - Key: Name
@@ -312,7 +313,7 @@ Resources:
   SQSLambdaTrigger:
     Type: AWS::Lambda::EventSourceMapping
     Properties:
-      EventSourceArn: !GetAtt.Arn TextractSQSQueue
+      EventSourceArn: !GetAtt TextractSQSQueue.Arn
       FunctionName: !Ref GetProcessedDocumentLambdaFunction
       Tags:
         - Key: Name
@@ -328,16 +329,9 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
-      FunctionName: !GetAtt GetProcessedDocumentLambdaFunction.Arn
+      FunctionName: !Ref GetProcessedDocumentLambdaFunction
       Principal: sqs.amazonaws.com
-      SourceArn: !GetAtt.Arn TextractSQSQueue
-
-  GetProcessedDocumentLambdaSubscription:
-    Type: AWS::SNS::Subscription
-    Properties:
-      Protocol: lambda
-      TopicArn: !!GetAtt.Arn TextractSQSQueue
-      Endpoint: !GetAtt GetProcessedDocumentLambdaFunction.Arn
+      SourceArn: !GetAtt TextractSQSQueue.Arn
 
   EmptyS3LambdaIAMRole:
     Type: AWS::IAM::Role
@@ -402,7 +396,7 @@ Resources:
               cfnresponse.send(event, context, cfnresponse.FAILED, {"Message": str(e)})
       Tags:
         - Key: Name
-          Value: !Sub ${AWS::StackName}-textprocessinglambda
+          Value: !Sub ${AWS::StackName}-emptys3bucketlambda
 
   EmptyS3Bucket:
     Type: Custom::EmptyS3Bucket
