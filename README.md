@@ -1,9 +1,9 @@
-# ⛽ Automated-EPRA-Fuel-Prices-Tracker-Across-Counties
+# Automated-EPRA-Fuel-Prices-Tracker-Across-Counties
 
-## 🌟 Overview
+## Overview
 An automated AWS-native pipeline designed to extract, process, and store regional fuel prices in Kenya. This solution leverages **AWS Textract**'s advanced document analysis to parse structural tables from PDF documents (typically EPRA gazette notices) and stores the resulting data into **Amazon DynamoDB** for easy querying and downstream consumption.
 
-## 🏗️ Architecture
+## Architecture
 The project follows a serverless, event-driven architecture deployed via **AWS CloudFormation**.
 
 ```mermaid
@@ -24,14 +24,14 @@ graph TD
 - **Amazon DynamoDB**: A fast and flexible NoSQL database storing the final "Town-to-Fuel-Price" mapping.
 - **AWS CloudFormation**: Fully Infrastructure-as-Code (IaC) driven deployment.
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - [AWS CLI](https://aws.amazon.com/cli/) installed and configured.
 - Appropriate IAM permissions to deploy CloudFormation stacks and manage the services listed above.
 - Python 3.13 (or compatible) for local testing of Lambda logic.
 
-### 🛠️ Deployment
+### Deployment
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/TROISTROIS/Automated-EPRA-Fuel-Prices-Tracker-Across-Counties.git
@@ -53,13 +53,13 @@ graph TD
 3. **Upload Lambda Code:**
    Ensure your Python scripts (`process-document.py` and `fetch-document.py`) are zipped and uploaded to the `ZipCodeBucketName` before deploying or updating the stack.
 
-## 📁 File Structure
+## File Structure
 - `backend-stack.yaml`: The CloudFormation template defining the entire AWS environment.
 - `process-document.py`: Lambda function that triggers Textract's asynchronous analysis.
 - `fetch-document.py`: Lambda function that retrieves, parses, and persists the extracted data.
 - `.gitignore`: Standard exclusion list for Git.
 
-## 🧹 Cleanup
+## Cleanup
 The stack includes a custom resource to automatically empty S3 buckets upon deletion, ensuring a clean teardown:
 ```powershell
 aws cloudformation delete-stack --stack-name FuelPriceTrackerStack
