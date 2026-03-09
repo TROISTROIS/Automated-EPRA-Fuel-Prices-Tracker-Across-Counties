@@ -31,19 +31,9 @@ Resources:
     Type: AWS::S3::Bucket
     Properties: 
       BucketName: !Ref DocumentS3BucketName
-#     NotificationConfiguration:
-#        LambdaConfigurations:
-#          - Event: s3:ObjectCreated:*
-#            Filter:
-#              S3Key:
-#                Rules:
-#                 - Name: suffix
-#                    Value: .pdf
-#            Function: !Ref !GetAtt TextProcessingLambda.Arn
       Tags:
         - Key: Name
           Value: !Sub ${AWS::StackName}-documentbucket
-
 
   DynamoDB:
     Type: AWS::DynamoDB::Table
@@ -147,7 +137,7 @@ Resources:
       VisibilityTimeout: 900
       Tags:
         - Key: Name
-          Value: !Sub AmazonTextract-${AWS::StackName}-queue
+          Value: !Sub ${AWS::StackName}-queue
 
   SQSQueuePolicy:
     Type: AWS::SQS::QueuePolicy
@@ -170,9 +160,8 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       Subscription:
-        - Endpoint: !Ref TextractSQSQueue
-          Protocol: sqs
-      DisplayName: Textract SNS Notification Topic
+        - Endpoint: !GetAtt TextractSQSQueue.Arn
+          Protocol: "sqs"
       Tags:
         - Key: Name
           Value: !Sub AmazonTextract-${AWS::StackName}-topic
