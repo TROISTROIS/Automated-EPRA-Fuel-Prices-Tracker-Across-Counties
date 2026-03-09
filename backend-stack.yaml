@@ -26,10 +26,6 @@ Parameters:
     Type: String
     Description: The name of the SQS queue for Textract notifications.
 
-  SNSTopic:
-    Type: String
-    Description: The name of the SNS topic for Textract notifications.
-
 Resources:
   DocumentS3Bucket: 
     Type: AWS::S3::Bucket
@@ -176,7 +172,6 @@ Resources:
       Subscription:
         - Endpoint: !Ref TextractSQSQueue
           Protocol: sqs
-      TopicName: !Ref SNSTopic
       DisplayName: Textract SNS Notification Topic
       Tags:
         - Key: Name
