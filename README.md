@@ -6,17 +6,17 @@ An automated AWS-native pipeline designed to extract, process, and store regiona
 ## Architecture
 The project follows a serverless, event-driven architecture deployed via **AWS CloudFormation**.
 
-```mermaid
-graph TD
-    A[PDF Upload to S3] -->|S3 Event Trigger| B[Lambda: ProcessDocument]
-    B -->|Start Table Analysis| C[AWS Textract]
-    C -->|Completion Notification| D[SNS Topic]
-    D -->|Push Notification| E[Lambda: FetchDocument]
-    E -->|Retrieve Results| C
-    E -->|Parse & Load Data| F[Amazon DynamoDB]
-```
+![Architecture Diagram](Textract.drawio.png)
 
-### 🛰️ Core Components
+### Architecture Workflow
+1. **Document Upload**: A PDF document (e.g., EPRA gazette notice) is uploaded to the landing S3 bucket.
+2. **Analysis Trigger**: The upload event triggers the `ProcessDocument` Lambda function.
+3. **AWS Textract Initiation**: The Lambda function starts an asynchronous table analysis job in AWS Textract.
+4. **Completion Notification**: Once the analysis is complete, Textract sends a notification to an Amazon SNS Topic.
+5. **Data Retrieval**: The SNS notification triggers the `FetchDocument` Lambda function.
+6. **Persistence**: The Lambda function retrieves the extracted tabular results, parses them, and stores the "Town-to-Fuel-Price" mapping in Amazon DynamoDB.
+
+### Core Components
 - **Amazon S3**: Acts as the landing zone for raw PDF fuel price documents.
 - **AWS Lambda**: Two-stage serverless functions for initiating Textract jobs and post-processing results.
 - **AWS Textract**: Automatically detects and extracts tabular data from document images.
@@ -40,13 +40,13 @@ graph TD
 
 2. **Deploy the CloudFormation Stack:**
    Use the `backend-stack.yaml` template to provision all resources:
-   ```powershell
-   aws cloudformation create-stack `
-     --stack-name FuelPriceTrackerStack `
-     --template-body file://backend-stack.yaml `
-     --parameters `
-        ParameterKey=DocumentS3BucketName,ParameterValue=your-unique-bucket-name `
-        ParameterKey=ZipCodeBucketName,ParameterValue=your-lambda-code-bucket `
+   ```bash
+   aws cloudformation create-stack \
+     --stack-name FuelPriceTrackerStack \
+     --template-body file://backend-stack.yaml \
+     --parameters \
+        ParameterKey=DocumentS3BucketName,ParameterValue=your-unique-bucket-name \
+        ParameterKey=ZipCodeBucketName,ParameterValue=your-lambda-code-bucket \
      --capabilities CAPABILITY_NAMED_IAM
    ```
 
@@ -61,7 +61,7 @@ graph TD
 
 ## Cleanup
 The stack includes a custom resource to automatically empty S3 buckets upon deletion, ensuring a clean teardown:
-```powershell
+```bash
 aws cloudformation delete-stack --stack-name FuelPriceTrackerStack
 ```
 
