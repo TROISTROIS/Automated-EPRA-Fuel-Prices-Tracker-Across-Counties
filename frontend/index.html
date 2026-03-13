@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Automated EPRA Fuel Prices Tracker Across Counties with secure role-based access.">
+    <title>EPRA Fuel Tracker Dashboard</title>
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Background Elements -->
+    <div class="bg-gradient"></div>
+    <div class="bg-glow"></div>
+
+    <!-- Application Wrapper -->
+    <div class="app-container">
+        
+        <!-- Header -->
+        <header class="glass-header">
+            <div class="logo">
+                <i class="fa-solid fa-gas-pump"></i>
+                <span>EPRA Tracker</span>
+            </div>
+            <nav class="auth-nav">
+                <div id="userInfo" class="user-info hidden">
+                    <span class="role-badge" id="roleBadge">User</span>
+                    <span id="usernameDisplay">John Doe</span>
+                </div>
+                <!-- Login/Logout Buttons -->
+                <button id="loginBtn" class="btn btn-primary">
+                    <i class="fa-solid fa-right-to-bracket"></i> Sign In
+                </button>
+                <button id="logoutBtn" class="btn btn-outline hidden">
+                    <i class="fa-solid fa-right-from-bracket"></i> Sign Out
+                </button>
+            </nav>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            
+            <!-- Unauthenticated State -->
+            <section id="welcomeSection" class="hero-section">
+                <div class="hero-content glass-card">
+                    <h1>Real-Time Fuel Analytics</h1>
+                    <p>Track automated EPRA fuel prices across Kenyan counties. Log in to access the dashboard and data updates.</p>
+                    <button id="heroLoginBtn" class="btn btn-large btn-primary">
+                        Get Started <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Authenticated Dashboard -->
+            <section id="dashboardSection" class="dashboard-section hidden">
+                
+                <!-- Admin Only Panel -->
+                <div id="adminPanel" class="admin-panel glass-card hidden">
+                    <div class="panel-header">
+                        <h2><i class="fa-solid fa-shield-halved"></i> Admin Control Center</h2>
+                        <p>Upload new EPRA PDF announcements to trigger the Textract extraction pipeline.</p>
+                    </div>
+                    <div class="upload-controls">
+                        <div class="file-input-wrapper">
+                            <input type="file" id="epraPdfFile" accept="application/pdf" class="file-input">
+                            <label for="epraPdfFile" class="file-label">
+                                <i class="fa-solid fa-cloud-arrow-up"></i>
+                                <span id="fileName">Select PDF Document...</span>
+                            </label>
+                        </div>
+                        <button id="uploadTriggerBtn" class="btn btn-success" disabled>
+                            <i class="fa-solid fa-bolt"></i> Upload & Process
+                        </button>
+                    </div>
+                    <div id="uploadStatus" class="status-message"></div>
+                </div>
+
+                <!-- Regular User Panel (Fuel Prices) -->
+                <div class="prices-panel glass-card">
+                    <div class="panel-header flex-between">
+                        <h2><i class="fa-solid fa-chart-line"></i> Current Fuel Prices</h2>
+                        <button id="refreshBtn" class="btn btn-icon" title="Refresh Data">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table id="pricesTable">
+                            <thead>
+                                <tr>
+                                    <th>County/Town</th>
+                                    <th>Super Petrol (KSh)</th>
+                                    <th>Diesel (KSh)</th>
+                                    <th>Kerosene (KSh)</th>
+                                    <th>Last Updated</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pricesTableBody">
+                                <!-- Data injected via JS -->
+                            </tbody>
+                        </table>
+                        
+                        <!-- Loading State -->
+                        <div id="tableLoader" class="loader-container">
+                            <div class="spinner"></div>
+                            <p>Fetching latest prices securely...</p>
+                        </div>
+                        
+                        <!-- Error State -->
+                        <div id="tableError" class="error-container hidden">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <p>Failed to load prices. Check your connection or token.</p>
+                        </div>
+                    </div>
+                </div>
+
+            </section>
+        </main>
+        
+        <!-- Footer -->
+        <footer>
+            <p>&copy; 2024 EPRA Fuel Prices Tracker Architecture. Powered by AWS Serverless.</p>
+        </footer>
+    </div>
+
+    <!-- Mock Cognito Logic & App Script -->
+    <script src="app.js"></script>
+</body>
+</html>
