@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template that provisions resources for the frontend
+
+Parameters:
+  Bucket:
+    Description: S3 Bucket for static website hosting
+    Type: String
+
+  APIGateway:
+    Description: API Gateway for user requests
+    Type: String
+
+  UserLambda:
+    Description: Lambda function for user requests
+    Type: String
+
+  AdminLambda:
+    Description: Lambda function for admin requests
+    Type: String
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Description: Bucket to host the application's static website
+    Properties:
+      BucketName: !Ref Bucket
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      Tags:
+        - Key: Name 
+          Value: !Sub ${AWS::StackName}-bucket
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action: 
+              - s3:GetObject
+            Effect: Allow
+            Resource: !Sub 'arn:aws:s3:::${S3Bucket}/*'
+            Principal: '*'
+
+Outputs:
+  WebsiteURL:
+    Value: !GetAtt S3Bucket.WebsiteURL 
+    Description: Static Website URL 
+
+
