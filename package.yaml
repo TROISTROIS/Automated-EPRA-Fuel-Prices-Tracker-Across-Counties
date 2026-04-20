@@ -5,10 +5,6 @@ Parameters:
   DocumentS3BucketName:
     Description: Fuel Prices Document S3 bucket
     Type: String
-  ArtifactBucketName:
-    Type: String
-    Description: Name of the S3 bucket created in the bootstrap stack (for cleanup
-      during deletion).
   DocumentProcessingLambdaFunctionName:
     Type: String
     Description: The name of the Lambda function.
@@ -99,8 +95,8 @@ Resources:
         Ref: DocumentProcessingLambdaFunctionName
       PackageType: Zip
       Code:
-        S3Bucket: epra-s3-zip-133
-        S3Key: 1f3a09c9c5bad8fe160037e4354d129e
+        S3Bucket: epra-artifact-bucket-s3
+        S3Key: bdd6b926e0645b2d7a9607ba6586af86
       Handler: process-document.lambda_handler
       Environment:
         Variables:
@@ -128,7 +124,9 @@ Resources:
         Ref: DocumentProcessingLambdaFunction
       Principal: s3.amazonaws.com
       SourceArn:
-        Fn::Sub: arn:aws:s3:::${DocumentS3Bucket}
+        Fn::GetAtt:
+        - DocumentS3Bucket
+        - Arn
   DocumentProcessingLambdaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -148,7 +146,7 @@ Resources:
       Tags:
       - Key: Name
         Value:
-          Fn::Sub: AmazonTextract-${AWS::StackName}-queue
+          Fn::Sub: ${AWS::StackName}-queue
   SQSQueuePolicy:
     Type: AWS::SQS::QueuePolicy
     Properties:
@@ -174,11 +172,10 @@ Resources:
     Properties:
       Subscription:
       - Endpoint:
-          Ref: TextractSQSQueue
+          Fn::GetAtt:
+          - TextractSQSQueue
+          - Arn
         Protocol: sqs
-      TopicName:
-        Fn::Sub: AmazonTextract-${AWS::StackName}-topic
-      DisplayName: Textract SNS Notification Topic
       Tags:
       - Key: Name
         Value:
@@ -288,8 +285,8 @@ Resources:
         Ref: GetProcessedDocumentLambdaFunctionName
       PackageType: Zip
       Code:
-        S3Bucket: epra-s3-zip-133
-        S3Key: 22e47402dcb2532a57a8ba8ea46d386d
+        S3Bucket: epra-artifact-bucket-s3
+        S3Key: f27a9397bb2dd76f7e950e7595713ef3
       Handler: fetch-document.lambda_handler
       Environment:
         Variables:
@@ -363,13 +360,18 @@ Resources:
             - s3:DeleteObject
             Resource:
             - Fn::Sub: arn:aws:s3:::${DocumentS3Bucket}/*
-            - Fn::Sub: arn:aws:s3:::${ArtifactBucketName}/*
+            - Fn::Sub:
+              - ${BucketArn}/*
+              - BucketArn:
+                  Fn::ImportValue: S3Package-ArtifactBucketARN
           - Effect: Allow
             Action:
             - s3:ListBucket
             Resource:
-            - Fn::Sub: arn:aws:s3:::${DocumentS3BucketName}
-            - Fn::Sub: arn:aws:s3:::${ArtifactBucketName}
+            - Fn::GetAtt:
+              - DocumentS3Bucket
+              - Arn
+            - Fn::ImportValue: S3Package-ArtifactBucketARN
   EmptyS3BucketLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -404,5 +406,5 @@ Resources:
         - EmptyS3BucketLambda
         - Arn
       BucketNames:
-      - Ref: DocumentS3BucketName
-      - Ref: ArtifactBucketName
+      - Ref: DocumentS3Bucket
+      - Fn::ImportValue: S3Package-ArtifactBucketName
