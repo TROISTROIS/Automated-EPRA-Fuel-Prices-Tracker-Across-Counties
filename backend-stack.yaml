@@ -5,10 +5,6 @@ Parameters:
   DocumentS3BucketName:
     Description: Fuel Prices Document S3 bucket
     Type: String
-   
-  ArtifactBucketName:
-    Type: String
-    Description: Name of the S3 bucket created in the bootstrap stack (for cleanup during deletion).
 
   DocumentProcessingLambdaFunctionName:
     Type: String
@@ -119,7 +115,7 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !Ref DocumentProcessingLambdaFunction
       Principal: s3.amazonaws.com
-      SourceArn: !Sub arn:aws:s3:::${DocumentS3Bucket}  
+      SourceArn: !GetAtt DocumentS3Bucket.Arn
 
   DocumentProcessingLambdaLogGroup:
     Type: AWS::Logs::LogGroup
@@ -324,14 +320,16 @@ Resources:
                   - s3:DeleteObject
                 Resource: 
                   - !Sub "arn:aws:s3:::${DocumentS3Bucket}/*"
-                  - !Sub "arn:aws:s3:::${ArtifactBucketName}/*"                  
+                  - !Sub 
+                    - "${BucketArn}/*"
+                    - BucketArn: !ImportValue S3Package-ArtifactBucketARN
 
               - Effect: Allow
                 Action: 
                   - s3:ListBucket
                 Resource: 
-                  - !Sub "arn:aws:s3:::${DocumentS3BucketName}"
-                  - !Sub "arn:aws:s3:::${ArtifactBucketName}"
+                  - !GetAtt DocumentS3Bucket.Arn
+                  - !ImportValue S3Package-ArtifactBucketARN
 
   EmptyS3BucketLambda:
     Type: AWS::Lambda::Function
@@ -368,5 +366,5 @@ Resources:
       ServiceTimeout: 35
       ServiceToken: !GetAtt EmptyS3BucketLambda.Arn
       BucketNames: 
-        - !Ref DocumentS3BucketName
-        - !Ref ArtifactBucketName
+        - !Ref DocumentS3Bucket
+        - Fn::ImportValue: S3Package-ArtifactBucketName

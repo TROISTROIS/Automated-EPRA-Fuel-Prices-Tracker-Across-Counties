@@ -1,0 +1,408 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template deploys resources to handle the backend logic that involves
+  document upload, text extraction and storage.
+Parameters:
+  DocumentS3BucketName:
+    Description: Fuel Prices Document S3 bucket
+    Type: String
+  ArtifactBucketName:
+    Type: String
+    Description: Name of the S3 bucket created in the bootstrap stack (for cleanup
+      during deletion).
+  DocumentProcessingLambdaFunctionName:
+    Type: String
+    Description: The name of the Lambda function.
+  GetProcessedDocumentLambdaFunctionName:
+    Type: String
+    Description: The name of the Lambda function for post-processing.
+  TextractSNSTriggerRoleName:
+    Type: String
+    Description: The name of the IAM role for Textract SNS trigger.
+  SQSQueueName:
+    Type: String
+    Description: The name of the SQS queue for Textract notifications.
+Resources:
+  DocumentS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName:
+        Ref: DocumentS3BucketName
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-documentbucket
+  DynamoDB:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Fn::Sub: ${AWS::StackName}-epratb
+      AttributeDefinitions:
+      - AttributeName: Town
+        AttributeType: S
+      KeySchema:
+      - AttributeName: Town
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-dynamodbtable
+  DocumentProcessingLambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-lambdaIAMRole
+      Description: IAM role for Lambda to access S3, Textract, DynamoDB and its execution
+        role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: FuelTrackerLambdaPolicy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            Resource:
+            - Fn::Sub: arn:aws:s3:::${DocumentS3Bucket}/*
+            - Fn::Sub: arn:aws:s3:::${DocumentS3Bucket}
+          - Effect: Allow
+            Action:
+            - textract:StartDocumentAnalysis
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: '*'
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-textprocessingIAMRole
+  DocumentProcessingLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Ref: DocumentProcessingLambdaFunctionName
+      PackageType: Zip
+      Code:
+        S3Bucket: epra-s3-zip-133
+        S3Key: 1f3a09c9c5bad8fe160037e4354d129e
+      Handler: process-document.lambda_handler
+      Environment:
+        Variables:
+          TEXTRACT_NOTIFICATION_TOPIC:
+            Ref: TextractNotificationTopic
+          TEXTRACT_ROLE_ARN:
+            Fn::GetAtt:
+            - TextractSNSTriggerRole
+            - Arn
+      Role:
+        Fn::GetAtt:
+        - DocumentProcessingLambdaIAMRole
+        - Arn
+      Timeout: 60
+      Runtime: python3.13
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-textprocessinglambda
+  S3InvokeDocumentProcessingLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: DocumentProcessingLambdaFunction
+      Principal: s3.amazonaws.com
+      SourceArn:
+        Fn::Sub: arn:aws:s3:::${DocumentS3Bucket}
+  DocumentProcessingLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${DocumentProcessingLambdaFunction}
+      RetentionInDays: 1
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-lambda-log-group
+  TextractSQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName:
+        Ref: SQSQueueName
+      VisibilityTimeout: 900
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: AmazonTextract-${AWS::StackName}-queue
+  SQSQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+      - Ref: TextractSQSQueue
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: sns.amazonaws.com
+          Action: SQS:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - TextractSQSQueue
+            - Arn
+          Condition:
+            ArnLike:
+              aws:SourceArn:
+                Ref: TextractNotificationTopic
+  TextractNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+      - Endpoint:
+          Ref: TextractSQSQueue
+        Protocol: sqs
+      TopicName:
+        Fn::Sub: AmazonTextract-${AWS::StackName}-topic
+      DisplayName: Textract SNS Notification Topic
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: AmazonTextract-${AWS::StackName}-topic
+  SNSTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+      - Ref: TextractNotificationTopic
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            AWS: '*'
+          Action: SNS:Publish
+          Resource:
+            Ref: TextractNotificationTopic
+          Condition:
+            StringEquals:
+              aws:SourceAccount:
+                Ref: AWS::AccountId
+  TextractSNSTriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Ref: TextractSNSTriggerRoleName
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: textract.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: TextractSNSPublishPolicy
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - sns:Publish
+            Resource:
+              Ref: TextractNotificationTopic
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-sns-trigger-IAMRole
+  GetProcessedDocumentLambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: ${AWS::StackName}-processedLambdaIAMRole
+      Description: IAM role for Lambda to access S3, Textract, DynamoDB and its execution
+        role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: FuelTrackerLambdaPolicy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:BatchWriteItem
+            Resource:
+              Fn::GetAtt:
+              - DynamoDB
+              - Arn
+          - Effect: Allow
+            Action:
+            - sqs:ReceiveMessage
+            - sqs:DeleteMessage
+            - sqs:GetQueueAttributes
+            Resource:
+              Fn::GetAtt:
+              - TextractSQSQueue
+              - Arn
+          - Effect: Allow
+            Action:
+            - textract:GetDocumentAnalysis
+            Resource: '*'
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: '*'
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-processedtextIAMRole
+  GetProcessedDocumentLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Ref: GetProcessedDocumentLambdaFunctionName
+      PackageType: Zip
+      Code:
+        S3Bucket: epra-s3-zip-133
+        S3Key: 22e47402dcb2532a57a8ba8ea46d386d
+      Handler: fetch-document.lambda_handler
+      Environment:
+        Variables:
+          DYNAMODB_TABLE:
+            Ref: DynamoDB
+      Role:
+        Fn::GetAtt:
+        - GetProcessedDocumentLambdaIAMRole
+        - Arn
+      Timeout: 300
+      Runtime: python3.13
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-processed-text-lambda
+  SQSLambdaTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn:
+        Fn::GetAtt:
+        - TextractSQSQueue
+        - Arn
+      FunctionName:
+        Ref: GetProcessedDocumentLambdaFunction
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-sqs-lambda-trigger
+  GetProcessedDocumentLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${GetProcessedDocumentLambdaFunction}
+      RetentionInDays: 1
+  SQSInvokeGetProcessedDocumentLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: GetProcessedDocumentLambdaFunction
+      Principal: sqs.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - TextractSQSQueue
+        - Arn
+  EmptyS3LambdaIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Sub: emptys3-${AWS::StackName}-lambdaIAMRole
+      Description: IAM role for Lambda to empty s3 bucket during stack deletion
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: EmptyS3LambdaPolicy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:DeleteObject
+            Resource:
+            - Fn::Sub: arn:aws:s3:::${DocumentS3Bucket}/*
+            - Fn::Sub: arn:aws:s3:::${ArtifactBucketName}/*
+          - Effect: Allow
+            Action:
+            - s3:ListBucket
+            Resource:
+            - Fn::Sub: arn:aws:s3:::${DocumentS3BucketName}
+            - Fn::Sub: arn:aws:s3:::${ArtifactBucketName}
+  EmptyS3BucketLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: emptys3bucket-${AWS::StackName}
+      Handler: index.lambda_handler
+      Role:
+        Fn::GetAtt:
+        - EmptyS3LambdaIAMRole
+        - Arn
+      Timeout: 300
+      Runtime: python3.13
+      Code:
+        ZipFile: "import boto3\nimport cfnresponse\ndef lambda_handler(event, context):\n\
+          \  try:\n    print(\"***** EVENT *****\", event)\n    if event['RequestType']\
+          \ == 'Delete':\n      bucket_list = event['ResourceProperties']['BucketNames']\n\
+          \      s3 = boto3.resource('s3')\n      for b in bucket_list:\n        print(f\"\
+          Emptying bucket: {b}\")\n        s3.Bucket(b).objects.all().delete()\n \
+          \   cfnresponse.send(event, context, cfnresponse.SUCCESS, {})\n  except\
+          \ Exception as e:\n    print(\"ERROR\", e )\n    cfnresponse.send(event,\
+          \ context, cfnresponse.FAILED, {\"Message\": str(e)})\n"
+      Tags:
+      - Key: Name
+        Value:
+          Fn::Sub: ${AWS::StackName}-emptys3bucketlambda
+  EmptyS3Bucket:
+    Type: Custom::EmptyS3Bucket
+    Properties:
+      ServiceTimeout: 35
+      ServiceToken:
+        Fn::GetAtt:
+        - EmptyS3BucketLambda
+        - Arn
+      BucketNames:
+      - Ref: DocumentS3BucketName
+      - Ref: ArtifactBucketName
