@@ -21,3 +21,9 @@ Outputs:
     Value: !Ref LambdaCodeS3Bucket
     Export:
       Name: !Sub ${AWS::StackName}-ArtifactBucketName
+
+  ArtifactBucketARN:
+    Description: The ARN of the artifact bucket
+    Value: !GetAtt LambdaCodeS3Bucket.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-ArtifactBucketARN
